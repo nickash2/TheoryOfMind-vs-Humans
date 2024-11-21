@@ -69,9 +69,13 @@ class ZeroOrderPlayer(Player):
         return total_count < current_bid.count
 
 
-class FirstOrderPlayer(ZeroOrderPlayer):
+class FirstOrderPlayer(Player):
     def __init__(self, name: str, num_dice: int):
         super().__init__(name, num_dice)
+
+    def set_players(self, players: List["Player"]):
+        """Sets the list of players in the game."""
+        self.players = players
 
     def make_bid(self, current_bid: Bid) -> Bid:
         """Makes a bid based on first-order ToM logic."""

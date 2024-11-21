@@ -1,5 +1,5 @@
 from typing import List
-from src.player import Player, HumanPlayer, ZeroOrderPlayer
+from src.player import Player, HumanPlayer, ZeroOrderPlayer, FirstOrderPlayer
 from src.wildperudo import WildPerudoGame
 
 

@@ -1,6 +1,5 @@
 from typing import List
-from .player import Player
-from .game import Bid
+from .player import Player, HumanPlayer, FirstOrderPlayer
 
 
 class WildPerudoGame:
@@ -11,11 +10,23 @@ class WildPerudoGame:
         self.current_player_idx = 0
         self.scores = {player.name: 0 for player in players}
 
+        # Share the list of players with each player
+        for player in players:
+            if isinstance(player, FirstOrderPlayer):  # Or any player type that needs this information
+                player.set_players(self.players)
+    
     def play_turn(self):
         """Plays a single turn of the game."""
         player = self.players[self.current_player_idx]
         print(f"\n{player.name}'s turn.")
-        print(f"Dice: {player.dice.values}")
+
+        # Show the current player's dice, hide the other player's dice
+        if isinstance(player, HumanPlayer):
+            # Show human player's dice
+            print(f"Your dice: {player.dice.values}")
+        else:
+            # Hide AI player's dice
+            print(f"Agent's dice: {player.dice.values}")
 
         if self.current_bid:
             print(f"Current bid: {self.current_bid}")
@@ -45,22 +56,25 @@ class WildPerudoGame:
             total_dice.extend(player.dice.values)
             print(f"{player.name}: {player.dice.values}")
 
-        # Count the number of matching dice (including wild ones)
-        count = total_dice.count(self.current_bid.face) + total_dice.count(1)
+        # Count wild dice and matches for the bid face
+        wild_count = total_dice.count(1)
+        bid_face_count = total_dice.count(self.current_bid.face)
+        effective_count = bid_face_count + wild_count
+
         bidder = self.get_current_bidder()
 
-        if count >= self.current_bid.count:
+        # Evaluate the challenge
+        if effective_count >= self.current_bid.count:
             print(f"The bid was correct! The bidder ({bidder.name}) wins this round!")
             self.scores[bidder.name] += 1
-            # End the round after a correct bid
-            self.current_bid = None  # Reset the bid
-            return True  # Indicates the round should end
         else:
             print(f"The bid was incorrect! The challenger ({challenger.name}) wins this round!")
             self.scores[challenger.name] += 1
-            # End the round after an incorrect bid
-            self.current_bid = None  # Reset the bid
-            return True  # Indicates the round should end
+
+        # Reset the bid and indicate the round is over
+        self.current_bid = None
+        return True
+
 
     def get_current_bidder(self) -> Player:
         """Returns the player who made the current bid."""
