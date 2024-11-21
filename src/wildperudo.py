@@ -1,0 +1,101 @@
+from typing import List
+from .player import Player
+from .game import Bid
+
+
+class WildPerudoGame:
+    """Main game logic for Wild Perudo."""
+    def __init__(self, players: List[Player]):
+        self.players = players
+        self.current_bid = None
+        self.current_player_idx = 0
+        self.scores = {player.name: 0 for player in players}
+
+    def play_turn(self):
+        """Plays a single turn of the game."""
+        player = self.players[self.current_player_idx]
+        print(f"\n{player.name}'s turn.")
+        print(f"Dice: {player.dice.values}")
+
+        if self.current_bid:
+            print(f"Current bid: {self.current_bid}")
+
+            if player.decide_challenge(self.current_bid, len(self.players)):
+                print(f"{player.name} challenges the bid!")
+                if self.resolve_challenge(player):
+                    return  # End the round after resolving the challenge
+
+        # Otherwise, make a new bid
+        new_bid = player.make_bid(self.current_bid)
+        if self.current_bid and not new_bid.is_valid_raise(self.current_bid):
+            print(f"{player.name} made an invalid bid. Turn skipped.")
+        else:
+            print(f"{player.name} bids: {new_bid}")
+            self.current_bid = new_bid
+
+        # Move to the next player for the next turn in the round
+        self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
+
+
+    def resolve_challenge(self, challenger: Player):
+        """Resolves a challenge."""
+        print("Revealing dice...")
+        total_dice = []
+        for player in self.players:
+            total_dice.extend(player.dice.values)
+            print(f"{player.name}: {player.dice.values}")
+
+        # Count the number of matching dice (including wild ones)
+        count = total_dice.count(self.current_bid.face) + total_dice.count(1)
+        bidder = self.get_current_bidder()
+
+        if count >= self.current_bid.count:
+            print(f"The bid was correct! The bidder ({bidder.name}) wins this round!")
+            self.scores[bidder.name] += 1
+            # End the round after a correct bid
+            self.current_bid = None  # Reset the bid
+            return True  # Indicates the round should end
+        else:
+            print(f"The bid was incorrect! The challenger ({challenger.name}) wins this round!")
+            self.scores[challenger.name] += 1
+            # End the round after an incorrect bid
+            self.current_bid = None  # Reset the bid
+            return True  # Indicates the round should end
+
+    def get_current_bidder(self) -> Player:
+        """Returns the player who made the current bid."""
+        return self.players[(self.current_player_idx - 1) % len(self.players)]
+
+    def start_game(self, max_rounds: int = 10):
+        """Starts the game loop."""
+        round_count = 0
+        while round_count < max_rounds:
+            print(f"\n--- Round {round_count + 1} ---")
+
+            # Re-roll dice at the start of each round, not after each turn
+            for player in self.players:
+                player.roll_dice()
+
+            # Keep playing turns for this round until there's a winner
+            round_winner_found = False
+            while not round_winner_found:
+                for player in self.players:
+                    self.play_turn()
+                    if self.current_bid is None:  # Round ends if the bid is resolved
+                        round_winner_found = True
+                        break  # Exit the loop once a winner is found for this round
+
+            # After a round is completed, move to the next round
+            round_count += 1
+
+        # Game over, calculate final results
+        print("\nGame Over! Final Scores:")
+        for player_name, score in self.scores.items():
+            print(f"{player_name}: {score}")
+
+        winner = max(self.scores, key=self.scores.get)
+        if self.scores[winner] == 0:
+            print("No winner! It's a tie!")
+        else:
+            print(f"The winner is {winner} with {self.scores[winner]} points!")
+
