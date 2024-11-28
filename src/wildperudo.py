@@ -1,14 +1,15 @@
 from typing import List
 from .player import Player, HumanPlayer, FirstOrderPlayer
-
+from typing import Tuple
 
 class WildPerudoGame:
     """Main game logic for Wild Perudo."""
-    def __init__(self, players: List[Player]):
+    def __init__(self, players: List[Player], callback=None, **kwargs):
         self.players = players
         self.current_bid = None
         self.current_player_idx = 0
         self.scores = {player.name: 0 for player in players}
+        self.callback = callback
 
         # Share the list of players with each player
         for player in players:
@@ -80,7 +81,7 @@ class WildPerudoGame:
         """Returns the player who made the current bid."""
         return self.players[(self.current_player_idx - 1) % len(self.players)]
 
-    def start_game(self, max_rounds: int = 10):
+    def start_game(self, max_rounds: int = 10) -> Tuple[Player, Player]:
         """Starts the game loop."""
         round_count = 0
         while round_count < max_rounds:
@@ -108,8 +109,11 @@ class WildPerudoGame:
             print(f"{player_name}: {score}")
 
         winner = max(self.scores, key=self.scores.get)
+        loser = min(self.scores, key=self.scores.get)
         if self.scores[winner] == 0:
             print("No winner! It's a tie!")
         else:
             print(f"The winner is {winner} with {self.scores[winner]} points!")
+        
+        return (winner, loser)
 

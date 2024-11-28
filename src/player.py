@@ -86,7 +86,7 @@ class FirstOrderPlayer(Player):
         # In this case, we assume they are likely to increase the bid in a reasonable way.
         predicted_count = current_bid.count + 1  # We predict the opponent will at least increase the count.
         predicted_face = current_bid.face
-        
+
         # Interpretative logic: Look at the opponent's dice to see if there's a higher likelihood of matching faces
         for player in self.players:
             if player.name != self.name:
