@@ -6,6 +6,7 @@ class Player:
     """Represents a player in the game. This is the base class for all players."""
     def __init__(self, name: str, num_dice: int):
         self.name = name
+        self.num_dice = num_dice
         self.dice = Dice(num_dice)
         self.current_bid = None
 
@@ -62,13 +63,12 @@ class ZeroOrderPlayer(Player):
         # Count the agent's own dice that match the current bid face (including wild ones)
         total_count = self.dice.values.count(current_bid.face) + self.dice.values.count(1)  # Include wild ones
 
-        # Total estimated count (including agent's dice and unseen dice estimation)
         total_count += estimated_count
 
         # If the total count (including estimates for unseen dice) is less than the bid count, challenge
         return total_count < current_bid.count
 
-
+# Work In Progress
 class FirstOrderPlayer(Player):
     def __init__(self, name: str, num_dice: int):
         super().__init__(name, num_dice)
@@ -82,33 +82,37 @@ class FirstOrderPlayer(Player):
         if current_bid is None:
             return Bid(1, random.randint(2, 6))  # Start with a random low bid
         
-        # Predictive logic: Based on the opponent's dice, predict their behavior
-        # In this case, we assume they are likely to increase the bid in a reasonable way.
-        predicted_count = current_bid.count + 1  # We predict the opponent will at least increase the count.
+        total_dice = sum(player.num_dice for player in self.players)
+        predicted_count = current_bid.count + 1
         predicted_face = current_bid.face
 
-        # Interpretative logic: Look at the opponent's dice to see if there's a higher likelihood of matching faces
-        for player in self.players:
-            if player.name != self.name:
-                # Assume the opponent will bid based on their own dice
-                if player.dice.values.count(current_bid.face) > 1:  # They likely have more dice of the same value
-                    predicted_face = current_bid.face
-                elif player.dice.values.count(1) > 0:  # They have wild dice, so they might bid more aggressively
-                    predicted_face = min(current_bid.face + 1, 6)  # We expect them to raise the face value
+        # Calculate the probability of the current bid being accurate
+        face_probability = (1 / 6) * total_dice
+        wild_probability = (1 / 6) * total_dice
+        total_probability = face_probability + wild_probability
+
+        if total_probability < current_bid.count:
+            predicted_count = current_bid.count + 1
+            predicted_face = current_bid.face
+        else:
+            predicted_face = min(current_bid.face + 1, 6)
 
         return Bid(predicted_count, predicted_face)
 
     def decide_challenge(self, current_bid: Bid, total_players: int) -> bool:
         """First-order agent decides to challenge based on predictions of the opponent's behavior."""
-        # Estimate the total number of dice that would match the current bid based on the opponent's dice
         total_dice_count = 0
         for player in self.players:
             if player.name != self.name:
                 total_dice_count += player.dice.values.count(current_bid.face)
                 total_dice_count += player.dice.values.count(1)  # Include wild dice
 
-        # First-order player will challenge if they believe the opponent's bid is unlikely to be accurate
-        if total_dice_count < current_bid.count:
+        total_dice = sum(player.num_dice for player in self.players)
+        face_probability = (1 / 6) * total_dice
+        wild_probability = (1 / 6) * total_dice
+        total_probability = face_probability + wild_probability
+
+        if total_probability < current_bid.count:
             return True  # Challenge if the prediction is not sufficient
 
         return False  # Otherwise, don't challenge
