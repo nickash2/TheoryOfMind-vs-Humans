@@ -2,8 +2,10 @@ from typing import List
 from .player import Player, HumanPlayer, FirstOrderPlayer
 from typing import Tuple
 
+
 class WildPerudoGame:
     """Main game logic for Wild Perudo."""
+
     def __init__(self, players: List[Player], callback=None, **kwargs):
         self.players = players
         self.current_bid = None
@@ -13,9 +15,8 @@ class WildPerudoGame:
 
         # Share the list of players with each player
         for player in players:
-            if isinstance(player, FirstOrderPlayer):  # Or any player type that needs this information
-                player.set_players(self.players)
-    
+            player.set_players(self.players)
+
     def play_turn(self):
         """Plays a single turn of the game."""
         player = self.players[self.current_player_idx]
@@ -48,7 +49,6 @@ class WildPerudoGame:
         # Move to the next player for the next turn in the round
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
 
-
     def resolve_challenge(self, challenger: Player):
         """Resolves a challenge."""
         print("Revealing dice...")
@@ -69,13 +69,14 @@ class WildPerudoGame:
             print(f"The bid was correct! The bidder ({bidder.name}) wins this round!")
             self.scores[bidder.name] += 1
         else:
-            print(f"The bid was incorrect! The challenger ({challenger.name}) wins this round!")
+            print(
+                f"The bid was incorrect! The challenger ({challenger.name}) wins this round!"
+            )
             self.scores[challenger.name] += 1
 
         # Reset the bid and indicate the round is over
         self.current_bid = None
         return True
-
 
     def get_current_bidder(self) -> Player:
         """Returns the player who made the current bid."""
@@ -114,6 +115,5 @@ class WildPerudoGame:
             print("No winner! It's a tie!")
         else:
             print(f"The winner is {winner} with {self.scores[winner]} points!")
-        
-        return (winner, loser)
 
+        return (winner, loser)

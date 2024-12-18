@@ -8,14 +8,13 @@ def main():
     print("Welcome to Wild Perudo!")
 
     players: List[Player] = [
-        HumanPlayer(name="Human Player", num_dice=5),
+        FirstOrderPlayer(name="ToM1", num_dice=5),
         ZeroOrderPlayer(name="ToM0", num_dice=5),
-        
     ]
 
     game = WildPerudoGame(players)
 
-    winner, loser = game.start_game(max_rounds=100000)
+    winner, loser = game.start_game(max_rounds=10000)
 
     data = DataCollector(game.scores.items())
     data.save_game_csv("data/results.csv")
