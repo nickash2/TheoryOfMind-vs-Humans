@@ -1,6 +1,7 @@
 import random
 from typing import List, Tuple
 from .game import Dice, Bid
+from scipy.stats import binom
 
 
 class Player:
@@ -45,38 +46,74 @@ class ZeroOrderPlayer(Player):
         super().__init__(name, num_dice)
 
     def make_bid(self, current_bid: Bid) -> Bid:
-        """Makes a bid based on the zero-order ToM logic."""
-        if current_bid is None:
-            return Bid(1, random.randint(2, 6))
+        """Make a more strategic opening or raising bid considering wild dice."""
+        known_dice = self.dice.values
+        wild_count = known_dice.count(1)  # Wild dice are face value '1'
 
-        # Zero-order strategy: Increase the bid count, or increment the face value randomly
-        count = current_bid.count + 1
-        face = current_bid.face
-        if random.random() > 0.5:  # 50% chance to increase face value
-            face = min(current_bid.face + 1, 6)
+        # Count dice for each face, including wild dice as any face
+        face_counts = {i: known_dice.count(i) for i in range(2, 7)}  # For faces 2-6
+        face_counts[1] = wild_count  # Wild dice can be used for any face
 
-        return Bid(count, face)
+        # If no current bid, make an opening bid based on the most common face
+        if not current_bid:
+            # Choose the most common face including wild dice
+            most_common_face = max(face_counts, key=face_counts.get)
+            bid_count = face_counts[most_common_face]
+            bid_count = max(1, bid_count)  # Ensure minimum count of 1
+            return Bid(count=bid_count, face=most_common_face)
+
+        # Otherwise, raise the bid strategically
+        min_raise = current_bid.count + 1
+        # If a bid count exceeds the total number of dice in the game, it should be capped
+        max_possible_dice = sum(
+            player.num_dice for player in self.players
+        )  # Total dice in the game
+        if min_raise > max_possible_dice:
+            min_raise = max_possible_dice  # Prevent the count from exceeding the number of dice in the game
+
+        for face, count in face_counts.items():
+            # Consider raising to a face with more known dice or wild dice
+            if count >= min_raise and face != current_bid.face:
+                return Bid(count=min_raise, face=face)
+
+        # If no better option, just raise the count on the current face
+        return Bid(count=min_raise, face=current_bid.face)
 
     def decide_challenge(self, current_bid: Bid, total_players: int) -> bool:
-        """Zero-order agent challenges based on statistical likelihood."""
-        # Calculate the number of dice that are unseen to this player
-        unseen_dice = total_players * self.dice.num_dice - len(self.dice.values)
+        """Decide whether to challenge the current bid considering wild dice."""
+        if not current_bid:
+            return False  # Cannot challenge if there's no bid
 
-        # Estimate how many of the unseen dice are likely to be the same as the current bid face
-        # Assuming fair dice rolls, the likelihood of seeing a specific face is roughly 1/6.
-        estimated_count = (
-            unseen_dice / 6
-        )  # Expected number of matching faces in unseen dice
+        # Get the total number of dice in the game
+        total_dice = sum(player.num_dice for player in self.players)
 
-        # Count the agent's own dice that match the current bid face (including wild ones)
-        total_count = self.dice.values.count(current_bid.face) + self.dice.values.count(
-            1
-        )  # Include wild ones
+        # The number of dice you already know for the current bid's face
+        known_dice = self.dice.values
+        wild_count = known_dice.count(1)  # Wild dice are face value '1'
+        estimated_known_matches = known_dice.count(current_bid.face) + wild_count
 
-        total_count += estimated_count
+        # The remaining dice from all players that are not yours
+        remaining_dice = total_dice - len(known_dice)
 
-        # If the total count (including estimates for unseen dice) is less than the bid count, challenge
-        return total_count < current_bid.count
+        # Probability of a die showing the value of current_bid.face
+        prob_match = (
+            1 / 3
+        )  # Wild Perudo variant: Wild dice are 1/3 chance of matching the bid face
+
+        # Total estimated matches (including wild dice)
+        estimated_matches = estimated_known_matches + remaining_dice * prob_match
+
+        # Calculate the probability of fewer than current_bid.count dice matching the bid
+        # We will use the binomial distribution to calculate this probability
+        challenge_prob = binom.cdf(current_bid.count - 1, remaining_dice, prob_match)
+
+        # Challenge if the bid is unlikely (probability is low)
+        if (
+            challenge_prob < 0.5
+        ):  # If the probability of matching the bid is less than 50%, challenge
+            return True
+
+        return False
 
 
 class FirstOrderPlayer(Player):

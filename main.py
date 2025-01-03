@@ -8,7 +8,7 @@ def main():
     print("Welcome to Wild Perudo!")
 
     players: List[Player] = [
-        FirstOrderPlayer(name="ToM1", num_dice=5),
+        ZeroOrderPlayer(name="ToM1", num_dice=5),
         ZeroOrderPlayer(name="ToM0", num_dice=5),
     ]
 
