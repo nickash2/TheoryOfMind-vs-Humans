@@ -1,5 +1,12 @@
 from typing import List
-from src.player import Player, HumanPlayer, ZeroOrderPlayer, FirstOrderPlayer
+from src.player import (
+    Player,
+    HumanPlayer,
+    ZeroOrderPlayer,
+    FirstOrderPlayer,
+    FirstOrderPlayer2,
+    ImprovedFirstOrderPlayer,
+)
 from src.wildperudo import WildPerudoGame
 from data.data_collector import DataCollector
 
@@ -8,7 +15,7 @@ def main():
     print("Welcome to Wild Perudo!")
 
     players: List[Player] = [
-        ZeroOrderPlayer(name="ToM1", num_dice=5),
+        ImprovedFirstOrderPlayer(name="ToM1", num_dice=5),
         ZeroOrderPlayer(name="ToM0", num_dice=5),
     ]
 

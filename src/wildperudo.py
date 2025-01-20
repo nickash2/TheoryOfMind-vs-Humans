@@ -45,23 +45,8 @@ class WildPerudoGame:
         # Otherwise, make a new bid
         new_bid = player.make_bid(self.current_bid)
         if self.current_bid and not new_bid.is_valid_raise(self.current_bid):
-            print(f"{player.name} made an invalid bid. They lose the game!")
-
-            # Eliminate the player from the game
-            self.players.pop(self.current_player_idx)
-
-            # Check if there is only one player left, the game ends immediately
-            if len(self.players) == 1:
-                print(f"{self.players[0].name} is the last remaining player!")
-                print(f"{self.players[0].name} wins the game!")
-                self.print_scores()
-                exit()
-
-            # Print the current scores
-            self.print_scores()
-
-            # Adjust the player index to account for the removed player
-            self.current_player_idx %= len(self.players)
+            print(f"{player.name} made an invalid bid. They lose the round!")
+            self.current_bid = None
             return
         else:
             print(f"{player.name} bids: {new_bid}")
