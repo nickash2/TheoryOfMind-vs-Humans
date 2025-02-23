@@ -3,6 +3,7 @@ import random
 
 class Dice:
     """Represents the dice a player holds."""
+
     def __init__(self, num_dice: int):
         self.num_dice = num_dice
         self.values = []
@@ -15,9 +16,11 @@ class Dice:
 
 class Bid:
     """Represents a bid in Wild Perudo."""
-    def __init__(self, count: int, face: int):
+
+    def __init__(self, count: int, face: int, bidder_index: int = None):
         self.count = count
         self.face = face
+        self.bidder_index = bidder_index
 
     def __repr__(self):
         return f"{self.count} {self.face}s"
@@ -43,5 +46,3 @@ class Bid:
         if self.count == current_bid.count and self.face > current_bid.face:
             return True
         return False
-
-

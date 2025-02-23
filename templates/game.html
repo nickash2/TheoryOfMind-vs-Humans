@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+
+    <title>Wild Perudo Game</title>
+</head>
+<body>
+    <h1>Wild Perudo Game</h1>
+    <p><strong>Round Number:</strong> {{ game_state.round_number }}</p>
+
+    <h2>Your Dice:</h2>
+    <p>{{ game_state.players['You'] }}</p>
+
+    <h3>Scores:</h3>
+    <ul>
+        {% for player_name, score in game_state.scores.items() %}
+            <li><strong>{{ player_name }}:</strong> {{ score }} points</li>
+        {% endfor %}
+    </ul>
+
+    {% if game_state.current_bid %}
+        <p><strong>Current Bid:</strong> {{ game_state.current_bid.count }} dice of face {{ game_state.current_bid.face }}</p>
+    {% else %}
+        <p>No current bid.</p>
+    {% endif %}
+
+    <p><strong>Current Player:</strong> {{ game_state.current_player }}</p>
+
+    {% if game_state.current_player == 'You' %}
+        <form action="/game/{{ game_id }}/bid" method="post">
+            <label for="count">Count:</label>
+            <input type="number" name="count" id="count" min="1" required>
+            <label for="face">Face:</label>
+            <input type="number" name="face" id="face" min="1" max="6" required>
+            <button type="submit">Make Bid</button>
+        </form>
+        <form action="/game/{{ game_id }}/challenge" method="post">
+            <button type="submit">Challenge</button>
+        </form>
+    {% else %}
+        <p>Waiting for AI to make a move...</p>
+    {% endif %}
+</body>
+</html>

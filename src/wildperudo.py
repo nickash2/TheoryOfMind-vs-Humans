@@ -2,8 +2,10 @@ from typing import List
 from .player import Player, HumanPlayer, FirstOrderPlayer
 from typing import Tuple
 
+
 class WildPerudoGame:
     """Main game logic for Wild Perudo."""
+
     def __init__(self, players: List[Player], callback=None, **kwargs):
         self.players = players
         self.current_bid = None
@@ -13,9 +15,14 @@ class WildPerudoGame:
 
         # Share the list of players with each player
         for player in players:
-            if isinstance(player, FirstOrderPlayer):  # Or any player type that needs this information
-                player.set_players(self.players)
-    
+            player.set_players(self.players)
+
+    def print_scores(self):
+        """Prints the current scores."""
+        print("\nCurrent Scores:")
+        for player_name, score in self.scores.items():
+            print(f"{player_name}: {score}")
+
     def play_turn(self):
         """Plays a single turn of the game."""
         player = self.players[self.current_player_idx]
@@ -23,10 +30,8 @@ class WildPerudoGame:
 
         # Show the current player's dice, hide the other player's dice
         if isinstance(player, HumanPlayer):
-            # Show human player's dice
             print(f"Your dice: {player.dice.values}")
         else:
-            # Hide AI player's dice
             print(f"Agent's dice: {player.dice.values}")
 
         if self.current_bid:
@@ -40,14 +45,17 @@ class WildPerudoGame:
         # Otherwise, make a new bid
         new_bid = player.make_bid(self.current_bid)
         if self.current_bid and not new_bid.is_valid_raise(self.current_bid):
-            print(f"{player.name} made an invalid bid. Turn skipped.")
+            print(f"{player.name} made an invalid bid. They lose the round!")
+            self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
+            self.scores[self.players[self.current_player_idx].name] += 1
+            self.current_bid = None
+            return
         else:
             print(f"{player.name} bids: {new_bid}")
             self.current_bid = new_bid
 
-        # Move to the next player for the next turn in the round
+        # Move to the next player for the next turn
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
-
 
     def resolve_challenge(self, challenger: Player):
         """Resolves a challenge."""
@@ -57,10 +65,15 @@ class WildPerudoGame:
             total_dice.extend(player.dice.values)
             print(f"{player.name}: {player.dice.values}")
 
-        # Count wild dice and matches for the bid face
-        wild_count = total_dice.count(1)
-        bid_face_count = total_dice.count(self.current_bid.face)
-        effective_count = bid_face_count + wild_count
+        # Count wild dice and bid face dice, ensuring no double counting
+        wild_dice = total_dice.count(1)
+        bid_face_dice = total_dice.count(self.current_bid.face)
+        if (
+            self.current_bid.face == 1
+        ):  # Wild dice shouldn't double count if bid face is 1
+            effective_count = bid_face_dice
+        else:
+            effective_count = bid_face_dice + wild_dice
 
         bidder = self.get_current_bidder()
 
@@ -69,13 +82,14 @@ class WildPerudoGame:
             print(f"The bid was correct! The bidder ({bidder.name}) wins this round!")
             self.scores[bidder.name] += 1
         else:
-            print(f"The bid was incorrect! The challenger ({challenger.name}) wins this round!")
+            print(
+                f"The bid was incorrect! The challenger ({challenger.name}) wins this round!"
+            )
             self.scores[challenger.name] += 1
 
         # Reset the bid and indicate the round is over
         self.current_bid = None
         return True
-
 
     def get_current_bidder(self) -> Player:
         """Returns the player who made the current bid."""
@@ -108,12 +122,17 @@ class WildPerudoGame:
         for player_name, score in self.scores.items():
             print(f"{player_name}: {score}")
 
-        winner = max(self.scores, key=self.scores.get)
-        loser = min(self.scores, key=self.scores.get)
-        if self.scores[winner] == 0:
-            print("No winner! It's a tie!")
+        # Determine the winner based on scores
+        if len(self.players) > 1:
+            winner = max(self.scores, key=self.scores.get)
+            loser = min(self.scores, key=self.scores.get)
+            if self.scores[winner] == 0:
+                print("No winner! It's a tie!")
+            else:
+                print(f"The winner is {winner} with {self.scores[winner]} points!")
         else:
-            print(f"The winner is {winner} with {self.scores[winner]} points!")
-        
-        return (winner, loser)
+            # If only one player remains, they are the winner
+            winner = self.players[0].name
+            print(f"The winner is {winner}!")
 
+        return (winner, loser if len(self.players) > 1 else None)
