@@ -426,14 +426,15 @@ class ImprovedFirstOrderPlayer(Player):
     def __init__(self, name: str, num_dice: int):
         super().__init__(name, num_dice)
         self.opponent_models = {}
-        self.bid_history = []  # Track all bids in the game
-        self.round_history = []  # Track outcomes of previous rounds
+        self.bid_history = []
+        self.round_history = []
+        self.opponent_dice_beliefs = {}  # Track beliefs about opponent's dice
 
     def set_players(self, players: List["Player"]):
         super().set_players(players)
         for player in players:
             if player.name != self.name:
-                # Initialize different possible models for the opponent
+                # Initialize opponent models
                 self.opponent_models[player.name] = {
                     "models": {
                         "conservative": {
@@ -452,39 +453,66 @@ class ImprovedFirstOrderPlayer(Player):
                     "last_action": None,
                     "bid_patterns": [],
                 }
+                # Initialize beliefs about opponent's dice
+                self.opponent_dice_beliefs[player.name] = {
+                    face: {"min": 0, "max": player.num_dice, "confidence": 0.5}
+                    for face in range(1, 7)
+                }
+
+    def update_dice_beliefs(self, opponent_name: str, bid: Bid):
+        """Update beliefs about opponent's dice based on their bid"""
+        beliefs = self.opponent_dice_beliefs[opponent_name]
+
+        # Find the opponent player object
+        opponent = next(p for p in self.players if p.name == opponent_name)
+
+        # If they bid a face, they likely have at least some of that face
+        beliefs[bid.face]["min"] = max(1, beliefs[bid.face]["min"])
+        beliefs[bid.face]["confidence"] += 0.1
+
+        # If they bid high on a face, they probably don't have many of other faces
+        if bid.count > 2:
+            for face in range(1, 7):
+                if face != bid.face and face != 1:  # Exclude the bid face and wildcards
+                    beliefs[face]["max"] = min(
+                        beliefs[face]["max"], opponent.num_dice - bid.count // 2
+                    )
+                    beliefs[face]["confidence"] += 0.05
 
     def interpretative_tom(self, opponent_name: str, current_bid: Bid) -> None:
-        """Interpretative ToM: Understanding why the opponent acted as observed"""
+        """Enhanced interpretative ToM with dice beliefs"""
+        # Update existing model weights
         models = self.opponent_models[opponent_name]["models"]
 
-        # Current game context
-        total_dice = sum(p.num_dice for p in self.players)
-        my_dice = self.dice.values
-        expected_dice = total_dice / 6
+        # Update beliefs about opponent's dice
+        self.update_dice_beliefs(opponent_name, current_bid)
 
-        # Analyze the bid in context
-        if self.bid_history:
-            bid_jump = current_bid.count - self.bid_history[-1].count
-            face_change = current_bid.face != self.bid_history[-1].face
-        else:
-            bid_jump = current_bid.count
-            face_change = False
+        # Analyze bid in context of our beliefs
+        beliefs = self.opponent_dice_beliefs[opponent_name]
 
-        # Update model weights based on observed action
         for model_name, model in models.items():
             likelihood = 1.0
 
-            if model_name == "conservative":
-                # Conservative players make smaller jumps and stay with same face
-                likelihood *= 1.2 if bid_jump <= 1 else 0.8
-                likelihood *= 1.2 if not face_change else 0.8
+            # If bid seems consistent with our dice beliefs, increase likelihood
+            if beliefs[current_bid.face]["min"] > 0:
+                likelihood *= 1.2
 
-            elif model_name == "aggressive":
-                # Aggressive players make larger jumps and change faces
-                likelihood *= 1.2 if bid_jump >= 2 else 0.8
-                likelihood *= 1.2 if face_change else 0.8
+            # If bid seems inconsistent with our beliefs, decrease likelihood
+            if current_bid.count > beliefs[current_bid.face]["max"] + beliefs[1]["max"]:
+                likelihood *= 0.8
 
-            # Update weight
+            # Update and apply other existing likelihood modifiers
+            if self.bid_history:
+                bid_jump = current_bid.count - self.bid_history[-1].count
+                face_change = current_bid.face != self.bid_history[-1].face
+
+                if model_name == "conservative":
+                    likelihood *= 1.2 if bid_jump <= 1 else 0.8
+                    likelihood *= 1.2 if not face_change else 0.8
+                elif model_name == "aggressive":
+                    likelihood *= 1.2 if bid_jump >= 2 else 0.8
+                    likelihood *= 1.2 if face_change else 0.8
+
             model["weight"] *= likelihood
 
         # Normalize weights
@@ -493,42 +521,54 @@ class ImprovedFirstOrderPlayer(Player):
             model["weight"] /= total_weight
 
     def predictive_tom(self, opponent_name: str, current_bid: Bid) -> dict:
-        """Predictive ToM: What will the opponent do next?"""
+        """Enhanced predictive ToM using dice beliefs"""
         models = self.opponent_models[opponent_name]["models"]
+        beliefs = self.opponent_dice_beliefs[opponent_name]
 
-        # Get the most likely model
         best_model = max(models.items(), key=lambda x: x[1]["weight"])
         model_params = best_model[1]["params"]
 
-        # Current game context
-        total_dice = sum(p.num_dice for p in self.players)
-        my_dice = self.dice.values
-        expected_dice = total_dice / 6
-
-        # Predict challenge probability
+        # Calculate challenge probability based on beliefs
         challenge_prob = 0.0
         if current_bid:
+            # If bid exceeds our belief of possible dice, increase challenge probability
+            max_possible = beliefs[current_bid.face]["max"] + beliefs[1]["max"]
+            if current_bid.count > max_possible:
+                challenge_prob += 0.3
+
+            # Add existing challenge probability calculations
+            total_dice = sum(p.num_dice for p in self.players)
+            expected_dice = total_dice / 6
             if current_bid.count > expected_dice * (2.0 - model_params["risk"]):
-                challenge_prob = 0.7
-            if len(self.bid_history) > 3:  # If game has gone on for a while
+                challenge_prob += 0.4
+
+            if len(self.bid_history) > 3:
                 challenge_prob += 0.1
 
-        # Predict next bid based on model
+        # Predict next bid based on model and beliefs
         likely_bid = None
         if current_bid:
-            if model_params["risk"] > 0.6:  # Aggressive model
-                likely_bid = Bid(current_bid.count + 2, current_bid.face)
-            else:  # Conservative model
+            # Consider opponent's likely dice when predicting their next bid
+            believed_count = beliefs[current_bid.face]["max"]
+            if believed_count >= current_bid.count:
+                # They probably have the dice they claim
+                if model_params["risk"] > 0.6:
+                    likely_bid = Bid(current_bid.count + 2, current_bid.face)
+                else:
+                    likely_bid = Bid(current_bid.count + 1, current_bid.face)
+            else:
+                # They might be bluffing
                 likely_bid = Bid(current_bid.count + 1, current_bid.face)
 
         return {
-            "challenge_probability": challenge_prob,
+            "challenge_probability": min(1.0, challenge_prob),
             "likely_bid": likely_bid,
             "model_confidence": best_model[1]["weight"],
+            "dice_beliefs": beliefs,
         }
 
     def make_bid(self, current_bid: Bid) -> Bid:
-        """Make bid using first-order ToM reasoning"""
+        """Make bid using enhanced first-order ToM reasoning"""
         if current_bid:
             self.bid_history.append(current_bid)
 
@@ -545,10 +585,11 @@ class ImprovedFirstOrderPlayer(Player):
         if not current_bid:
             return self._make_opening_bid()
 
+        beliefs = self.opponent_dice_beliefs[opponent.name]
         if prediction["challenge_probability"] > 0.6:
-            return self._make_safe_bid(current_bid)
+            return self._make_safe_bid(current_bid, beliefs)
         else:
-            return self._make_strategic_bid(current_bid, prediction)
+            return self._make_strategic_bid(current_bid, prediction, beliefs)
 
     def _make_opening_bid(self) -> Bid:
         """Make an opening bid based on known dice"""
@@ -559,47 +600,344 @@ class ImprovedFirstOrderPlayer(Player):
         most_common_face = max(face_counts, key=face_counts.get)
         return Bid(count=max(1, face_counts[most_common_face]), face=most_common_face)
 
-    def _make_safe_bid(self, current_bid: Bid) -> Bid:
-        """Make a conservative bid when we predict opponent might challenge"""
+    def _make_safe_bid(self, current_bid: Bid, beliefs: dict) -> Bid:
+        """Make a conservative bid considering opponent's likely dice"""
         known_dice = self.dice.values
         wild_count = known_dice.count(1)
         matching_dice = known_dice.count(current_bid.face) + wild_count
 
-        if matching_dice >= current_bid.count:
+        # Consider opponent's believed dice
+        believed_opponent_dice = beliefs[current_bid.face]["min"] + beliefs[1]["min"]
+        total_believed = matching_dice + believed_opponent_dice
+
+        if total_believed >= current_bid.count:
             return Bid(current_bid.count + 1, current_bid.face)
         else:
             return Bid(current_bid.count, current_bid.face)
 
-    def _make_strategic_bid(self, current_bid: Bid, prediction: dict) -> Bid:
-        """Make a bid based on prediction and known dice"""
+    def _make_strategic_bid(
+        self, current_bid: Bid, prediction: dict, beliefs: dict
+    ) -> Bid:
+        """Make a strategic bid based on prediction and beliefs"""
         known_dice = self.dice.values
         wild_count = known_dice.count(1)
-
-        # If we have a strong hand, be more aggressive
         matching_dice = known_dice.count(current_bid.face) + wild_count
-        if matching_dice >= current_bid.count:
-            return Bid(current_bid.count + 2, current_bid.face)
 
-        # Otherwise, make a moderate raise
-        return Bid(current_bid.count + 1, current_bid.face)
+        # Consider opponent's believed dice
+        believed_opponent_dice = beliefs[current_bid.face]["min"] + beliefs[1]["min"]
+        total_believed = matching_dice + believed_opponent_dice
+
+        if total_believed >= current_bid.count:
+            # We're confident in the total dice count
+            return Bid(current_bid.count + 2, current_bid.face)
+        elif matching_dice >= current_bid.count // 2:
+            # We have a decent number of dice ourselves
+            return Bid(current_bid.count + 1, current_bid.face)
+        else:
+            # Consider changing face to one we have more of
+            best_face = max(
+                range(1, 7),
+                key=lambda f: known_dice.count(f) + (wild_count if f != 1 else 0),
+            )
+            if known_dice.count(best_face) + wild_count > matching_dice:
+                return Bid(current_bid.count, best_face)
+            return Bid(current_bid.count + 1, current_bid.face)
 
     def decide_challenge(self, current_bid: Bid, total_players: int) -> bool:
-        """Decide whether to challenge using first-order ToM"""
+        """Enhanced challenge decision using dice beliefs"""
         opponent = [p for p in self.players if p.name != self.name][0]
+        beliefs = self.opponent_dice_beliefs[opponent.name]
 
         # Use our opponent model to inform challenge decision
         model = self.opponent_models[opponent.name]["models"]
         best_model = max(model.items(), key=lambda x: x[1]["weight"])
 
-        # Calculate basic probability
-        total_dice = sum(p.num_dice for p in self.players)
-        expected_dice = total_dice / 6 + total_dice / 6  # Face + Wilds
+        # Calculate probability based on our dice and beliefs about opponent's dice
+        known_dice = self.dice.values
+        matching_dice = known_dice.count(current_bid.face) + known_dice.count(1)
+        believed_opponent_dice = beliefs[current_bid.face]["max"] + beliefs[1]["max"]
+        total_believed = matching_dice + believed_opponent_dice
 
-        # Adjust threshold based on opponent model
+        # Challenge if bid exceeds what we believe is possible
+        if current_bid.count > total_believed:
+            return True
+
+        # Adjust threshold based on opponent model and game state
         threshold = 1.3
         if best_model[0] == "aggressive":
             threshold *= 0.9
         elif best_model[0] == "conservative":
             threshold *= 1.1
 
+        # Consider challenging if bid significantly exceeds expected dice
+        total_dice = sum(p.num_dice for p in self.players)
+        expected_dice = total_dice / 6 + total_dice / 6  # Face + Wilds
+        return current_bid.count > expected_dice * threshold
+
+
+class ImprovedFirstOrderPlayer2(Player):
+    def __init__(self, name: str, num_dice: int):
+        super().__init__(name, num_dice)
+        self.opponent_models = {}
+        self.bid_history = []
+        self.round_history = []
+        self.opponent_dice_beliefs = {}  # Track beliefs about opponent's dice
+
+    def set_players(self, players: List["Player"]):
+        super().set_players(players)
+        for player in players:
+            if player.name != self.name:
+                # Initialize opponent models
+                self.opponent_models[player.name] = {
+                    "models": {
+                        "conservative": {
+                            "weight": 0.33,
+                            "params": {"risk": 0.3, "bluff": 0.2},
+                        },
+                        "aggressive": {
+                            "weight": 0.33,
+                            "params": {"risk": 0.7, "bluff": 0.6},
+                        },
+                        "balanced": {
+                            "weight": 0.34,
+                            "params": {"risk": 0.5, "bluff": 0.4},
+                        },
+                    },
+                    "last_action": None,
+                    "bid_patterns": [],
+                }
+                # Initialize beliefs about opponent's dice
+                self.opponent_dice_beliefs[player.name] = {
+                    face: {"min": 0, "max": player.num_dice, "confidence": 0.5}
+                    for face in range(1, 7)
+                }
+
+    def update_dice_beliefs(self, opponent_name: str, bid: Bid):
+        """Update beliefs about opponent's dice based on their bid with enhanced ToM0"""
+        beliefs = self.opponent_dice_beliefs[opponent_name]
+        opponent = next(p for p in self.players if p.name == opponent_name)
+
+        # Basic probability calculations
+        total_dice = opponent.num_dice
+        expected_per_face = total_dice / 6
+        wild_probability = 1 / 6  # Probability of rolling a wild (1)
+
+        # Update bid face beliefs
+        if bid.count > expected_per_face * 2:
+            # If bid is significantly above expected, they're likely bluffing
+            beliefs[bid.face]["confidence"] -= 0.05
+        else:
+            beliefs[bid.face]["min"] = max(1, beliefs[bid.face]["min"])
+            beliefs[bid.face]["confidence"] += 0.1
+
+        # Update wild dice beliefs
+        expected_wilds = total_dice * wild_probability
+        beliefs[1]["min"] = max(0, min(beliefs[1]["min"], round(expected_wilds)))
+        beliefs[1]["max"] = min(
+            total_dice, max(beliefs[1]["max"], round(expected_wilds * 2))
+        )
+
+        # Update other faces based on high bids
+        if bid.count > 2:
+            remaining_dice = total_dice - bid.count // 2
+            for face in range(2, 7):
+                if face != bid.face:
+                    beliefs[face]["max"] = min(beliefs[face]["max"], remaining_dice)
+                    # Adjust confidence based on how reasonable the remaining count is
+                    if remaining_dice < expected_per_face:
+                        beliefs[face]["confidence"] += 0.05
+
+    def interpretative_tom(self, opponent_name: str, current_bid: Bid) -> None:
+        """Enhanced interpretative ToM with dice beliefs"""
+        # Update existing model weights
+        models = self.opponent_models[opponent_name]["models"]
+
+        # Update beliefs about opponent's dice
+        self.update_dice_beliefs(opponent_name, current_bid)
+
+        # Analyze bid in context of our beliefs
+        beliefs = self.opponent_dice_beliefs[opponent_name]
+
+        for model_name, model in models.items():
+            likelihood = 1.0
+
+            # If bid seems consistent with our dice beliefs, increase likelihood
+            if beliefs[current_bid.face]["min"] > 0:
+                likelihood *= 1.2
+
+            # If bid seems inconsistent with our beliefs, decrease likelihood
+            if current_bid.count > beliefs[current_bid.face]["max"] + beliefs[1]["max"]:
+                likelihood *= 0.8
+
+            # Update and apply other existing likelihood modifiers
+            if self.bid_history:
+                bid_jump = current_bid.count - self.bid_history[-1].count
+                face_change = current_bid.face != self.bid_history[-1].face
+
+                if model_name == "conservative":
+                    likelihood *= 1.2 if bid_jump <= 1 else 0.8
+                    likelihood *= 1.2 if not face_change else 0.8
+                elif model_name == "aggressive":
+                    likelihood *= 1.2 if bid_jump >= 2 else 0.8
+                    likelihood *= 1.2 if face_change else 0.8
+
+            model["weight"] *= likelihood
+
+        # Normalize weights
+        total_weight = sum(model["weight"] for model in models.values())
+        for model in models.values():
+            model["weight"] /= total_weight
+
+    def predictive_tom(self, opponent_name: str, current_bid: Bid) -> dict:
+        """Enhanced predictive ToM using dice beliefs"""
+        models = self.opponent_models[opponent_name]["models"]
+        beliefs = self.opponent_dice_beliefs[opponent_name]
+
+        best_model = max(models.items(), key=lambda x: x[1]["weight"])
+        model_params = best_model[1]["params"]
+
+        # Calculate challenge probability based on beliefs
+        challenge_prob = 0.0
+        if current_bid:
+            # If bid exceeds our belief of possible dice, increase challenge probability
+            max_possible = beliefs[current_bid.face]["max"] + beliefs[1]["max"]
+            if current_bid.count > max_possible:
+                challenge_prob += 0.3
+
+            # Add existing challenge probability calculations
+            total_dice = sum(p.num_dice for p in self.players)
+            expected_dice = total_dice / 6
+            if current_bid.count > expected_dice * (2.0 - model_params["risk"]):
+                challenge_prob += 0.4
+
+            if len(self.bid_history) > 3:
+                challenge_prob += 0.1
+
+        # Predict next bid based on model and beliefs
+        likely_bid = None
+        if current_bid:
+            # Consider opponent's likely dice when predicting their next bid
+            believed_count = beliefs[current_bid.face]["max"]
+            if believed_count >= current_bid.count:
+                # They probably have the dice they claim
+                if model_params["risk"] > 0.6:
+                    likely_bid = Bid(current_bid.count + 2, current_bid.face)
+                else:
+                    likely_bid = Bid(current_bid.count + 1, current_bid.face)
+            else:
+                # They might be bluffing
+                likely_bid = Bid(current_bid.count + 1, current_bid.face)
+
+        return {
+            "challenge_probability": min(1.0, challenge_prob),
+            "likely_bid": likely_bid,
+            "model_confidence": best_model[1]["weight"],
+            "dice_beliefs": beliefs,
+        }
+
+    def make_bid(self, current_bid: Bid) -> Bid:
+        """Make bid using enhanced first-order ToM reasoning"""
+        if current_bid:
+            self.bid_history.append(current_bid)
+
+        opponent = [p for p in self.players if p.name != self.name][0]
+
+        # First, interpret opponent's last action if there was one
+        if current_bid:
+            self.interpretative_tom(opponent.name, current_bid)
+
+        # Then, predict opponent's next action
+        prediction = self.predictive_tom(opponent.name, current_bid)
+
+        # Make decision based on both interpretative and predictive insights
+        if not current_bid:
+            return self._make_opening_bid()
+
+        beliefs = self.opponent_dice_beliefs[opponent.name]
+        if prediction["challenge_probability"] > 0.6:
+            return self._make_safe_bid(current_bid, beliefs)
+        else:
+            return self._make_strategic_bid(current_bid, prediction, beliefs)
+
+    def _make_opening_bid(self) -> Bid:
+        """Make an opening bid based on known dice"""
+        known_dice = self.dice.values
+        wild_count = known_dice.count(1)
+        face_counts = {i: known_dice.count(i) + wild_count for i in range(2, 7)}
+        face_counts[1] = wild_count
+        most_common_face = max(face_counts, key=face_counts.get)
+        return Bid(count=max(1, face_counts[most_common_face]), face=most_common_face)
+
+    def _make_safe_bid(self, current_bid: Bid, beliefs: dict) -> Bid:
+        """Make a conservative bid considering opponent's likely dice"""
+        known_dice = self.dice.values
+        wild_count = known_dice.count(1)
+        matching_dice = known_dice.count(current_bid.face) + wild_count
+
+        # Consider opponent's believed dice
+        believed_opponent_dice = beliefs[current_bid.face]["min"] + beliefs[1]["min"]
+        total_believed = matching_dice + believed_opponent_dice
+
+        if total_believed >= current_bid.count:
+            return Bid(current_bid.count + 1, current_bid.face)
+        else:
+            return Bid(current_bid.count, current_bid.face)
+
+    def _make_strategic_bid(
+        self, current_bid: Bid, prediction: dict, beliefs: dict
+    ) -> Bid:
+        """Make a strategic bid based on prediction and beliefs"""
+        known_dice = self.dice.values
+        wild_count = known_dice.count(1)
+        matching_dice = known_dice.count(current_bid.face) + wild_count
+
+        # Consider opponent's believed dice
+        believed_opponent_dice = beliefs[current_bid.face]["min"] + beliefs[1]["min"]
+        total_believed = matching_dice + believed_opponent_dice
+
+        if total_believed >= current_bid.count:
+            # We're confident in the total dice count
+            return Bid(current_bid.count + 2, current_bid.face)
+        elif matching_dice >= current_bid.count // 2:
+            # We have a decent number of dice ourselves
+            return Bid(current_bid.count + 1, current_bid.face)
+        else:
+            # Consider changing face to one we have more of
+            best_face = max(
+                range(1, 7),
+                key=lambda f: known_dice.count(f) + (wild_count if f != 1 else 0),
+            )
+            if known_dice.count(best_face) + wild_count > matching_dice:
+                return Bid(current_bid.count, best_face)
+            return Bid(current_bid.count + 1, current_bid.face)
+
+    def decide_challenge(self, current_bid: Bid, total_players: int) -> bool:
+        """Enhanced challenge decision using dice beliefs"""
+        opponent = [p for p in self.players if p.name != self.name][0]
+        beliefs = self.opponent_dice_beliefs[opponent.name]
+
+        # Use our opponent model to inform challenge decision
+        model = self.opponent_models[opponent.name]["models"]
+        best_model = max(model.items(), key=lambda x: x[1]["weight"])
+
+        # Calculate probability based on our dice and beliefs about opponent's dice
+        known_dice = self.dice.values
+        matching_dice = known_dice.count(current_bid.face) + known_dice.count(1)
+        believed_opponent_dice = beliefs[current_bid.face]["max"] + beliefs[1]["max"]
+        total_believed = matching_dice + believed_opponent_dice
+
+        # Challenge if bid exceeds what we believe is possible
+        if current_bid.count > total_believed:
+            return True
+
+        # Adjust threshold based on opponent model and game state
+        threshold = 1.3
+        if best_model[0] == "aggressive":
+            threshold *= 0.9
+        elif best_model[0] == "conservative":
+            threshold *= 1.1
+
+        # Consider challenging if bid significantly exceeds expected dice
+        total_dice = sum(p.num_dice for p in self.players)
+        expected_dice = total_dice / 6 + total_dice / 6  # Face + Wilds
         return current_bid.count > expected_dice * threshold

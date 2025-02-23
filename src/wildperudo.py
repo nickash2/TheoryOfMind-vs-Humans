@@ -46,6 +46,8 @@ class WildPerudoGame:
         new_bid = player.make_bid(self.current_bid)
         if self.current_bid and not new_bid.is_valid_raise(self.current_bid):
             print(f"{player.name} made an invalid bid. They lose the round!")
+            self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
+            self.scores[self.players[self.current_player_idx].name] += 1
             self.current_bid = None
             return
         else:
